@@ -115,7 +115,7 @@ http://localhost/Student-Course-Registration/public/index.html
 - ✔ Session handling using Redis  
 - ✔ Database connection (MySQL + MongoDB)  
 - ✔ AJAX profile & course updates  
-- ⏳ AWS Hosting (Pending)  
+- ✔ AWS Hosting (Pending)  
 
 ---
 
