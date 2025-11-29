@@ -1,68 +1,97 @@
 <?php
-// assets/php/profile.php
-require_once "config.php";   // uses $mysqli from config.php
+header('Content-Type: application/json');
+
+require __DIR__ . '/db.php';
+$redis  = require __DIR__ . '/redis.php';
 
 $action = $_POST['action'] ?? '';
+$token  = $_POST['token']  ?? '';
 
-if ($action === 'load') {
-    $user_id = intval($_POST['user_id'] ?? 0);
+if (!$token) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'No session token provided'
+    ]);
+    exit;
+}
 
-    if (!$user_id) {
-        echo json_encode(["success" => false, "message" => "Missing user id"]);
+// Look up user id from Redis
+$userId = $redis->get("session:$token");
+
+if (!$userId) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Session expired. Please login again.'
+    ]);
+    exit;
+}
+
+try {
+
+    if ($action === 'load') {
+        $stmt = $pdo->prepare(
+            "SELECT full_name, email, age, dob, contact, courses, semester
+             FROM users WHERE id = ?"
+        );
+        $stmt->execute([$userId]);
+        $user = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        echo json_encode([
+            'success' => true,
+            'data'    => $user
+        ]);
         exit;
     }
 
-    $stmt = $mysqli->prepare("SELECT full_name, email, age, dob, contact, courses, semester FROM users WHERE id = ?");
-    $stmt->bind_param("i", $user_id);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $data = $result->fetch_assoc();
-    $stmt->close();
+    if ($action === 'update_profile') {
+        $full_name = $_POST['full_name'] ?? '';
+        $age       = $_POST['age']       ?? null;
+        $dob       = $_POST['dob']       ?? null;
+        $contact   = $_POST['contact']   ?? '';
 
-    if ($data) {
-        echo json_encode(["success" => true, "data" => $data]);
-    } else {
-        echo json_encode(["success" => false, "message" => "User not found"]);
+        $stmt = $pdo->prepare(
+            "UPDATE users 
+             SET full_name = ?, age = ?, dob = ?, contact = ?
+             WHERE id = ?"
+        );
+        $stmt->execute([$full_name, $age, $dob, $contact, $userId]);
+
+        echo json_encode([
+            'success' => true,
+            'message' => 'Profile updated successfully'
+        ]);
+        exit;
     }
-    exit;
-}
 
-if ($action === 'update_profile') {
-    $user_id   = intval($_POST['user_id'] ?? 0);
-    $full_name = $_POST['full_name'] ?? '';
-    $age       = $_POST['age'] ?? null;
-    $dob       = $_POST['dob'] ?? null;
-    $contact   = $_POST['contact'] ?? '';
+    if ($action === 'save_courses') {
+        $courses  = $_POST['courses'] ?? [];
+        if (!is_array($courses)) $courses = [];
+        $semester = $_POST['semester'] ?? '';
 
-    $stmt = $mysqli->prepare("UPDATE users SET full_name = ?, age = ?, dob = ?, contact = ? WHERE id = ?");
-    $stmt->bind_param("sissi", $full_name, $age, $dob, $contact, $user_id);
-    $ok = $stmt->execute();
-    $stmt->close();
+        $coursesJson = json_encode($courses);
 
-    echo json_encode([
-        "success" => $ok,
-        "message" => $ok ? "Profile updated" : "Update failed"
-    ]);
-    exit;
-}
+        $stmt = $pdo->prepare(
+            "UPDATE users 
+             SET courses = ?, semester = ?
+             WHERE id = ?"
+        );
+        $stmt->execute([$coursesJson, $semester, $userId]);
 
-if ($action === 'save_courses') {
-    $user_id = intval($_POST['user_id'] ?? 0);
-    $courses = $_POST['courses'] ?? [];
-    $semester = $_POST['semester'] ?? '';
-
-    $courses_json = json_encode($courses);
-
-    $stmt = $mysqli->prepare("UPDATE users SET courses = ?, semester = ? WHERE id = ?");
-    $stmt->bind_param("ssi", $courses_json, $semester, $user_id);
-    $ok = $stmt->execute();
-    $stmt->close();
+        echo json_encode([
+            'success' => true,
+            'message' => 'Courses saved successfully'
+        ]);
+        exit;
+    }
 
     echo json_encode([
-        "success" => $ok,
-        "message" => $ok ? "Courses saved" : "Failed to save courses"
+        'success' => false,
+        'message' => 'Invalid action'
     ]);
-    exit;
-}
 
-echo json_encode(["success" => false, "message" => "Invalid action"]);
+} catch (Exception $e) {
+    echo json_encode([
+        'success' => false,
+        'message' => 'Server error: ' . $e->getMessage()
+    ]);
+}
